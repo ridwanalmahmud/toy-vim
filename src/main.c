@@ -1,4 +1,5 @@
 #include "main.h"
+#include "modes.h"
 #include <ncurses.h>
 
 void backspace(void) {
@@ -20,29 +21,27 @@ void backspace(void) {
     }
 }
 
-void mode_stat(void) {
-    int row, col;
-    getmaxyx(stdscr, row, col);
-    mvprintw(row - 1, 0, "INSERT");
-    move(0, 0);
-}
-
 int main(void) {
     initscr();
     raw();
     keypad(stdscr, true);
     noecho();
 
-    mode_stat();
+    Mode mode = NORMAL;
+    mode_stat(mode);
 
     int ch = getch();
-    addch(ch);
-    while (ch != 'q') {
+    while (ch != CTRL('q')) {
+        mode_stat(mode);
         ch = getch();
-        if (ch == BACKSPACE) {
-            backspace();
-        } else {
-            addch(ch);
+        switch (mode) {
+        case NORMAL:
+            normal_mode(ch, &mode);
+            break;
+        case INSERT:
+            keypad(stdscr, FALSE);
+            insert_mode(ch, &mode);
+            break;
         }
     }
 
