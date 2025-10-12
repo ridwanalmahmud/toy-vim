@@ -22,6 +22,7 @@ set(SOURCES
     src/main.c
     src/modes.c
     src/buffer.c
+    src/utils.c
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
