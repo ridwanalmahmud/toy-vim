@@ -1,18 +1,18 @@
 #include "modes.h"
 #include "main.h"
+#include "buffer.h"
 #include <ncurses.h>
+#include <stdlib.h>
+#include <string.h>
 
 char *stringify_mode(Mode mode) {
     switch (mode) {
     case NORMAL:
         return "NORMAL";
-        break;
     case INSERT:
         return "INSERT";
-        break;
     default:
         return "NORMAL";
-        break;
     }
 }
 
@@ -27,8 +27,12 @@ void mode_stat(Mode mode) {
 void write_buffer(char *filename, Buffer *buff) {
     FILE *file = fopen(filename, "w");
     if (file) {
-        fwrite(buff->contents, 1, buff->buf_size, file);
-        buff->contents[buff->buf_size] = '\0';
+        for (size_t i = 0; i < buff->num_rows; i++) {
+            fwrite(buff->rows[i].contents, 1, buff->rows[i].length, file);
+            if (i < buff->num_rows - 1) {
+                fputc('\n', file);
+            }
+        }
         fclose(file);
     }
 }
@@ -42,66 +46,154 @@ int get_line_len(int line) {
             break;
         }
     }
-
     return line_len;
 }
-void backspace(Buffer *buff) {
-    int x, y;
-    getyx(stdscr, y, x);
 
-    if (x != 0) {
-        move(y, x - 1);
-        delch();
-        if (buff->buf_x > 0) {
-            buff->buf_x -= 1;
-            buff->buf_size -= 1;
-        }
-    } else if (y > 0) {
-        int prev_line_len = get_line_len(y - 1);
-        move(y - 1, prev_line_len);
-        delch();
-        if (buff->buf_y > 0) {
-            buff->buf_y -= 1;
-            buff->buf_x = prev_line_len;
-            buff->buf_size -= 1;
+// Helper function to ensure row has enough capacity
+void ensure_row_capacity(Row *row, size_t needed) {
+    if (needed >= row->capacity) {
+        size_t new_capacity = row->capacity ? row->capacity * 2 : 64;
+        char *new_contents = realloc(row->contents, new_capacity);
+        if (new_contents) {
+            row->contents = new_contents;
+            row->capacity = new_capacity;
         }
     }
 }
 
+// Helper function to ensure buffer has enough rows
+void ensure_buffer_capacity(Buffer *buff) {
+    if (buff->num_rows >= buff->capacity) {
+        size_t new_capacity = buff->capacity ? buff->capacity * 2 : 16;
+        Row *new_rows = realloc(buff->rows, new_capacity * sizeof(Row));
+        if (new_rows) {
+            buff->rows = new_rows;
+            buff->capacity = new_capacity;
+        }
+    }
+}
+
+void insert_char_at_cursor(Buffer *buff, char ch) {
+    if (buff->cursor.y >= buff->num_rows)
+        return;
+
+    Row *row = &buff->rows[buff->cursor.y];
+    ensure_row_capacity(row, row->length + 1);
+
+    // Insert character at cursor position
+    if (buff->cursor.x <= row->length) {
+        memmove(row->contents + buff->cursor.x + 1,
+                row->contents + buff->cursor.x,
+                row->length - buff->cursor.x);
+        row->contents[buff->cursor.x] = ch;
+        row->length++;
+        row->contents[row->length] = '\0';
+        buff->cursor.x++;
+    }
+}
+
+void backspace(Buffer *buff) {
+    if (buff->cursor.y >= buff->num_rows)
+        return;
+
+    Row *row = &buff->rows[buff->cursor.y];
+
+    if (buff->cursor.x > 0) {
+        // delete character before cursor
+        memmove(row->contents + buff->cursor.x - 1,
+                row->contents + buff->cursor.x,
+                row->length - buff->cursor.x);
+        row->length--;
+        row->contents[row->length] = '\0';
+        buff->cursor.x--;
+    } else if (buff->cursor.y > 0) {
+        // merge with previous line
+        Row *prev_row = &buff->rows[buff->cursor.y - 1];
+        size_t prev_len = prev_row->length;
+
+        ensure_row_capacity(prev_row, prev_row->length + row->length);
+        memcpy(prev_row->contents + prev_len, row->contents, row->length);
+        prev_row->length += row->length;
+        prev_row->contents[prev_row->length] = '\0';
+
+        // remove the current row
+        free(row->contents);
+        memmove(buff->rows + buff->cursor.y,
+                buff->rows + buff->cursor.y + 1,
+                (buff->num_rows - buff->cursor.y - 1) * sizeof(Row));
+        buff->num_rows--;
+
+        buff->cursor.y--;
+        buff->cursor.x = prev_len;
+    }
+}
+
+void insert_newline(Buffer *buff) {
+    ensure_buffer_capacity(buff);
+
+    if (buff->cursor.y >= buff->num_rows)
+        return;
+    Row *current_row = &buff->rows[buff->cursor.y];
+
+    // create new row
+    size_t split_pos = buff->cursor.x;
+    size_t new_line_len = current_row->length - split_pos;
+
+    // move rows down to make space
+    memmove(buff->rows + buff->cursor.y + 2,
+            buff->rows + buff->cursor.y + 1,
+            (buff->num_rows - buff->cursor.y - 1) * sizeof(Row));
+
+    // initialize new row
+    Row *new_row = &buff->rows[buff->cursor.y + 1];
+    new_row->capacity = new_line_len + 16;
+    new_row->contents = malloc(new_row->capacity);
+    new_row->length = new_line_len;
+    if (new_line_len > 0) {
+        memcpy(
+            new_row->contents, current_row->contents + split_pos, new_line_len);
+    }
+    new_row->contents[new_line_len] = '\0';
+
+    // truncate current row
+    current_row->length = split_pos;
+    current_row->contents[split_pos] = '\0';
+
+    buff->num_rows++;
+
+    // update line numbers
+    for (size_t i = buff->cursor.y + 1; i < buff->num_rows; i++) {
+        buff->rows[i].line_num = i + 1;
+    }
+
+    buff->cursor.y++;
+    buff->cursor.x = 0;
+}
+
 void insert_mode(int ch, Buffer *buff, Mode *mode) {
-    int x, y;
-    getyx(stdscr, y, x);
     switch (ch) {
     case ESC:
         *mode = NORMAL;
-        if (x > 0) {
-            move(y, x - 1);
-        } else {
-            move(y, x);
+        if (buff->cursor.x > 0) {
+            buff->cursor.x--;
         }
         break;
     case BACKSPACE:
         backspace(buff);
         break;
     case ENTER:
-        buff->contents[buff->buf_size++] = '\n';
-        move(y + 1, 0);
+        insert_newline(buff);
         break;
     default:
-        buff->contents[buff->buf_size++] = ch;
-        insch(ch);
-        move(y, x + 1);
-        buff->buf_x = x + 1;
-        buff->buf_y = y;
+        insert_char_at_cursor(buff, ch);
         break;
     }
 }
 
 void normal_mode(int ch, Buffer *buff, Mode *mode) {
-    int x, y;
-    getyx(stdscr, y, x);
     int max_x, max_y;
     getmaxyx(stdscr, max_y, max_x);
+
     switch (ch) {
     case CTRL('w'):
         write_buffer("buff.txt", buff);
@@ -113,64 +205,116 @@ void normal_mode(int ch, Buffer *buff, Mode *mode) {
     case 'a':
         keypad(stdscr, FALSE);
         *mode = INSERT;
-        move(y, x + 1);
+        if (buff->cursor.x < buff->rows[buff->cursor.y].length) {
+            buff->cursor.x++;
+        }
         break;
     case 'o':
         keypad(stdscr, FALSE);
         *mode = INSERT;
-        move(y + 1, 0);
+        // insert new line below current line
+        ensure_buffer_capacity(buff);
+        memmove(buff->rows + buff->cursor.y + 2,
+                buff->rows + buff->cursor.y + 1,
+                (buff->num_rows - buff->cursor.y - 1) * sizeof(Row));
+        buff->rows[buff->cursor.y + 1] = (Row){0};
+        buff->rows[buff->cursor.y + 1].contents = strdup("");
+        buff->rows[buff->cursor.y + 1].length = 0;
+        buff->rows[buff->cursor.y + 1].capacity = 64;
+        buff->rows[buff->cursor.y + 1].line_num = buff->cursor.y + 2;
+        buff->num_rows++;
+        buff->cursor.y++;
+        buff->cursor.x = 0;
         break;
     case 'O':
         keypad(stdscr, FALSE);
         *mode = INSERT;
-        move(y - 1, 0);
+        // insert new line above current line
+        ensure_buffer_capacity(buff);
+        memmove(buff->rows + buff->cursor.y + 1,
+                buff->rows + buff->cursor.y,
+                (buff->num_rows - buff->cursor.y) * sizeof(Row));
+        buff->rows[buff->cursor.y] = (Row){0};
+        buff->rows[buff->cursor.y].contents = strdup("");
+        buff->rows[buff->cursor.y].length = 0;
+        buff->rows[buff->cursor.y].capacity = 64;
+        buff->rows[buff->cursor.y].line_num = buff->cursor.y + 1;
+        buff->num_rows++;
+        buff->cursor.x = 0;
+        // update line numbers for all subsequent rows
+        for (size_t i = buff->cursor.y + 1; i < buff->num_rows; i++) {
+            buff->rows[i].line_num++;
+        }
         break;
     case 'h':
-        move(y, x - 1);
+        if (buff->cursor.x > 0)
+            buff->cursor.x--;
         break;
     case 'j':
-        move(y + 1, x);
+        if (buff->cursor.y < buff->num_rows - 1)
+            buff->cursor.y++;
         break;
     case 'k':
-        move(y - 1, x);
+        if (buff->cursor.y > 0)
+            buff->cursor.y--;
         break;
     case 'l':
-        move(y, x + 1);
+        if (buff->cursor.x < buff->rows[buff->cursor.y].length - 1)
+            buff->cursor.x++;
         break;
     case '0':
-        move(y, 0);
+        buff->cursor.x = 0;
         break;
     case '$':
-        move(y, max_x);
+        buff->cursor.x = buff->rows[buff->cursor.y].length;
         break;
     case 'I':
         *mode = INSERT;
-        move(y, 0);
+        buff->cursor.x = 0;
         break;
     case 'A':
         *mode = INSERT;
-        move(y, max_x - 1);
+        buff->cursor.x = buff->rows[buff->cursor.y].length;
         break;
     case 'g':
-        move(0, x);
+        buff->cursor.y = 0;
+        buff->cursor.x = 0;
         break;
     case 'G':
-        move(max_y - 2, x);
+        if (buff->num_rows > 0) {
+            buff->cursor.y = buff->num_rows - 1;
+            buff->cursor.x = 0;
+        }
         break;
     case 's':
         *mode = INSERT;
-        delch();
+        if (buff->cursor.x < buff->rows[buff->cursor.y].length) {
+            // delete character at cursor
+            Row *row = &buff->rows[buff->cursor.y];
+            memmove(row->contents + buff->cursor.x,
+                    row->contents + buff->cursor.x + 1,
+                    row->length - buff->cursor.x - 1);
+            row->length--;
+            row->contents[row->length] = '\0';
+        }
         break;
     case 'x':
-        delch();
+        if (buff->cursor.x < buff->rows[buff->cursor.y].length) {
+            Row *row = &buff->rows[buff->cursor.y];
+            memmove(row->contents + buff->cursor.x,
+                    row->contents + buff->cursor.x + 1,
+                    row->length - buff->cursor.x - 1);
+            row->length--;
+            row->contents[row->length] = '\0';
+        }
         break;
     case 'D':
-        move(y, 0);
-        clrtoeol();
-        move(y - 1, 0);
+        // delete to end of line
+        if (buff->cursor.y < buff->num_rows) {
+            Row *row = &buff->rows[buff->cursor.y];
+            row->length = buff->cursor.x;
+            row->contents[buff->cursor.x] = '\0';
+        }
         break;
     }
-
-    buff->buf_x = x;
-    buff->buf_y = y;
 }

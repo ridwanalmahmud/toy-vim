@@ -21,6 +21,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 set(SOURCES
     src/main.c
     src/modes.c
+    src/buffer.c
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

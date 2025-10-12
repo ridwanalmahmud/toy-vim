@@ -1,7 +1,7 @@
 #ifndef MODES_H
 #define MODES_H
 
-#include "main.h"
+#include "buffer.h"
 
 typedef enum {
     NORMAL,
