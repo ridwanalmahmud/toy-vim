@@ -79,6 +79,32 @@ void backspace(Buffer *buff) {
     }
 }
 
+void delete_row(Buffer *buff, size_t row_index) {
+    if (row_index >= buff->num_rows)
+        return;
+
+    // free the row's contents
+    free(buff->rows[row_index].contents);
+
+    // shift rows down
+    for (size_t i = row_index; i < buff->num_rows - 1; i++) {
+        buff->rows[i] = buff->rows[i + 1];
+        buff->rows[i].line_num = i + 1;
+    }
+
+    buff->num_rows--;
+
+    // ensure we always have at least one row
+    if (buff->num_rows == 0) {
+        ensure_buffer_capacity(buff);
+        buff->rows[0].capacity = 64;
+        buff->rows[0].contents = calloc(1, buff->rows[0].capacity);
+        buff->rows[0].length = 0;
+        buff->rows[0].line_num = 1;
+        buff->num_rows = 1;
+    }
+}
+
 void insert_newline(Buffer *buff) {
     ensure_buffer_capacity(buff);
 
@@ -198,34 +224,58 @@ void normal_mode(int ch, Buffer *buff, Mode *mode) {
         }
         break;
     case 'h':
-        if (buff->cursor.x > 0)
+        if (buff->cursor.x > 0) {
             buff->cursor.x--;
+        }
         break;
     case 'j':
-        if (buff->cursor.y < buff->num_rows - 1)
+        if (buff->cursor.y < buff->num_rows - 1) {
             buff->cursor.y++;
+            // Ensure cursor x doesn't go beyond new line length
+            if (buff->cursor.x > buff->rows[buff->cursor.y].length - 1) {
+                buff->cursor.x = buff->rows[buff->cursor.y].length - 1;
+            }
+        }
         break;
     case 'k':
-        if (buff->cursor.y > 0)
+        if (buff->cursor.y > 0) {
             buff->cursor.y--;
+            // Ensure cursor x doesn't go beyond new line length
+            if (buff->cursor.x > buff->rows[buff->cursor.y].length - 1) {
+                buff->cursor.x = buff->rows[buff->cursor.y].length - 1;
+            }
+        }
         break;
     case 'l':
-        if (buff->cursor.x < buff->rows[buff->cursor.y].length - 1)
+        if (buff->cursor.x < buff->rows[buff->cursor.y].length - 1) {
             buff->cursor.x++;
+        }
         break;
     case '0':
         buff->cursor.x = 0;
         break;
     case '$':
-        buff->cursor.x = buff->rows[buff->cursor.y].length;
+        buff->cursor.x = buff->rows[buff->cursor.y].length - 1;
         break;
-    case 'I':
-        *mode = INSERT;
-        buff->cursor.x = 0;
-        break;
-    case 'A':
-        *mode = INSERT;
-        buff->cursor.x = buff->rows[buff->cursor.y].length;
+    case '_':
+        if (buff->cursor.y < buff->num_rows) {
+            Row *row = &buff->rows[buff->cursor.y];
+
+            // find first non-whitespace character
+            size_t first_non_ws = 0;
+            while (first_non_ws < row->length &&
+                   (row->contents[first_non_ws] == ' ' ||
+                    row->contents[first_non_ws] == '\t')) {
+                first_non_ws++;
+            }
+
+            // if line is empty or all whitespace, go to start
+            if (first_non_ws >= row->length) {
+                buff->cursor.x = 0;
+            } else {
+                buff->cursor.x = first_non_ws;
+            }
+        }
         break;
     case 'g':
         buff->cursor.y = 0;
@@ -240,7 +290,6 @@ void normal_mode(int ch, Buffer *buff, Mode *mode) {
     case 's':
         *mode = INSERT;
         if (buff->cursor.x < buff->rows[buff->cursor.y].length) {
-            // delete character at cursor
             Row *row = &buff->rows[buff->cursor.y];
             memmove(row->contents + buff->cursor.x,
                     row->contents + buff->cursor.x + 1,
@@ -260,11 +309,20 @@ void normal_mode(int ch, Buffer *buff, Mode *mode) {
         }
         break;
     case 'D':
-        // delete to end of line
         if (buff->cursor.y < buff->num_rows) {
             Row *row = &buff->rows[buff->cursor.y];
             row->length = buff->cursor.x;
             row->contents[buff->cursor.x] = '\0';
+        }
+        break;
+    case CTRL('d'):
+        if (buff->num_rows > 0) {
+            delete_row(buff, buff->cursor.y);
+
+            if (buff->cursor.y >= buff->num_rows && buff->num_rows > 0) {
+                buff->cursor.y = buff->num_rows - 1;
+            }
+            buff->cursor.x = 0;
         }
         break;
     }

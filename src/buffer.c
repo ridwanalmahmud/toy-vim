@@ -13,7 +13,7 @@ void init_buffer(Buffer *buff) {
         return;
     }
 
-    // Create initial empty row
+    // start with one empty row
     buff->num_rows = 1;
     buff->rows[0].capacity = 64;
     buff->rows[0].contents = malloc(buff->rows[0].capacity);
@@ -22,6 +22,10 @@ void init_buffer(Buffer *buff) {
         buff->rows[0].length = 0;
         buff->rows[0].line_num = 1;
     }
+
+    // initialize scrolling
+    buff->row_offset = 0;
+    buff->col_offset = 0;
 }
 
 void free_buffer(Buffer *buff) {
@@ -35,7 +39,7 @@ void free_buffer(Buffer *buff) {
         free(buff->rows);
     }
 
-    // Reset the buffer to empty state
+    // reset the buffer to empty state
     buff->rows = NULL;
     buff->num_rows = 0;
     buff->capacity = 0;
@@ -69,7 +73,6 @@ int get_line_len(int line) {
     return line_len;
 }
 
-// helper function to ensure row has enough capacity
 void ensure_row_capacity(Row *row, size_t needed) {
     if (needed >= row->capacity) {
         size_t new_capacity = row->capacity ? row->capacity * 2 : 64;
@@ -81,7 +84,6 @@ void ensure_row_capacity(Row *row, size_t needed) {
     }
 }
 
-// helper function to ensure buffer has enough rows
 void ensure_buffer_capacity(Buffer *buff) {
     if (buff->num_rows >= buff->capacity) {
         size_t new_capacity = buff->capacity ? buff->capacity * 2 : 16;

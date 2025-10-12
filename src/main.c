@@ -3,11 +3,8 @@
 #include "modes.h"
 #include <ncurses.h>
 #include <stdlib.h>
-
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <ncurses.h>
 
 int load_file_into_buffer(const char *filename, Buffer *buff) {
     FILE *file = fopen(filename, "r");
@@ -53,6 +50,82 @@ void create_empty_file(const char *filename) {
     }
 }
 
+void draw_interface(Buffer *buff, Mode mode, const char *filename) {
+    int screen_rows, screen_cols;
+    getmaxyx(stdscr, screen_rows, screen_cols);
+
+    clear();
+
+    // adjust row offset if cursor moved off screen
+    if (buff->cursor.y < buff->row_offset) {
+        buff->row_offset = buff->cursor.y;
+    } else if (buff->cursor.y >= buff->row_offset + screen_rows - 1) {
+        buff->row_offset = buff->cursor.y - screen_rows + 2;
+    }
+
+    // adjust column offset if cursor moved off screen
+    if (buff->cursor.x < buff->col_offset) {
+        buff->col_offset = buff->cursor.x;
+    } else if (buff->cursor.x >= buff->col_offset + screen_cols) {
+        buff->col_offset = buff->cursor.x - screen_cols + 1;
+    }
+
+    // display visible rows only
+    for (int i = 0; i < screen_rows - 1; i++) {
+        size_t row_idx = buff->row_offset + i;
+
+        if (row_idx < buff->num_rows) {
+            Row *row = &buff->rows[row_idx];
+
+            // calculate how much of the line to display
+            int display_length = row->length - buff->col_offset;
+            if (display_length > screen_cols) {
+                display_length = screen_cols;
+            }
+
+            if (display_length > 0 && buff->col_offset < row->length) {
+                mvprintw(i,
+                         0,
+                         "%.*s",
+                         display_length,
+                         row->contents + buff->col_offset);
+            }
+
+            // clear the rest of the line
+            if (display_length < screen_cols) {
+                mvprintw(
+                    i, display_length, "%*s", screen_cols - display_length, "");
+            }
+        } else {
+            // clear empty lines
+            mvprintw(i, 0, "%*s", screen_cols, "");
+        }
+    }
+
+    // draw status bar with scrolling info
+    attron(A_REVERSE);
+    mvprintw(screen_rows - 1,
+             0,
+             " %s | %s | Row %zu/%zu, Col %zu ",
+             stringify_mode(mode),
+             filename,
+             buff->cursor.y + 1,
+             buff->num_rows,
+             buff->cursor.x + 1);
+    clrtoeol();
+    attroff(A_REVERSE);
+
+    // calculate screen-relative cursor position
+    int screen_cursor_y = buff->cursor.y - buff->row_offset;
+    int screen_cursor_x = buff->cursor.x - buff->col_offset;
+
+    // ensure cursor stays on screen
+    if (screen_cursor_y >= 0 && screen_cursor_y < screen_rows - 1 &&
+        screen_cursor_x >= 0 && screen_cursor_x < screen_cols) {
+        move(screen_cursor_y, screen_cursor_x);
+    }
+}
+
 int main(int argc, char *argv[]) {
     initscr();
     raw();
@@ -62,45 +135,19 @@ int main(int argc, char *argv[]) {
     Buffer buff;
     init_buffer(&buff);
 
-    char *filename = NULL;
-
+    char *filename = "untitled.txt";
     if (argc > 1) {
         filename = argv[1];
-
-        if (load_file_into_buffer(filename, &buff) == 0) {
-            mvprintw(0, 0, "Loaded: %s", filename);
-        } else {
+        if (load_file_into_buffer(filename, &buff) != 0) {
             create_empty_file(filename);
-            mvprintw(0, 0, "New file: %s", filename);
         }
-    } else {
-        filename = "untitled.txt";
-        mvprintw(0, 0, "No file specified. Using: %s", filename);
     }
 
     Mode mode = NORMAL;
-
     int ch = 0;
+
     while (ch != CTRL('q')) {
-        clear();
-
-        // display file content
-        for (size_t i = 0; i < buff.num_rows && i < (size_t)(LINES - 2); i++) {
-            if (buff.rows[i].contents) {
-                mvprintw(i, 0, "%s", buff.rows[i].contents);
-            }
-        }
-
-        // draw status bar with filename and mode
-        int row, col;
-        getmaxyx(stdscr, row, col);
-        attron(A_REVERSE);
-        mvprintw(row - 1, 0, " %s | %s ", stringify_mode(mode), filename);
-        clrtoeol();
-        attroff(A_REVERSE);
-
-        // move cursor to current position
-        move(buff.cursor.y, buff.cursor.x);
+        draw_interface(&buff, mode, filename);
         refresh();
 
         ch = getch();
@@ -116,13 +163,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // save before quitting if filename was provided
-    if (argc > 1) {
-        write_buffer(filename, &buff);
-    } else {
-        write_buffer("untitled.txt", &buff);
-    }
-
+    write_buffer(filename, &buff);
     free_buffer(&buff);
     endwin();
     return 0;

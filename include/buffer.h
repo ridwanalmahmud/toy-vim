@@ -2,18 +2,17 @@
 #define BUFFER_H
 
 #include <stddef.h>
-#include <stdint.h>
 
 typedef struct {
-    uint16_t x;
-    uint16_t y;
+    size_t x;
+    size_t y;
 } Cursor;
 
 typedef struct {
     char *contents;
     size_t length;
     size_t capacity;
-    uint32_t line_num;
+    size_t line_num;
 } Row;
 
 typedef struct {
@@ -22,6 +21,10 @@ typedef struct {
     size_t capacity;
     size_t size;
     Cursor cursor;
+
+    // for scrolling
+    size_t row_offset;
+    size_t col_offset;
 } Buffer;
 
 void init_buffer(Buffer *buff);
