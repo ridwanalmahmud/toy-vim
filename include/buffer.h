@@ -26,5 +26,9 @@ typedef struct {
 
 void init_buffer(Buffer *buff);
 void free_buffer(Buffer *buff);
+void write_buffer(char *filename, Buffer *buff);
+int get_line_len(int line);
+void ensure_row_capacity(Row *row, size_t needed);
+void ensure_buffer_capacity(Buffer *buff);
 
 #endif // !BUFFER_H
