@@ -1,11 +1,18 @@
-#ifndef __MAIN_H__
-#define __MAIN_H__
+#ifndef MAIN_H
+#define MAIN_H
 
-#define BACKSPACE 263
+#include <stddef.h>
+
+#define BACKSPACE 127
 #define ENTER 10
 #define ESC 27
 #define CTRL(x) ((x) & 0x1f)
 
-void backspace(void);
+typedef struct {
+    char *contents;
+    size_t buf_size;
+    size_t buf_x;
+    size_t buf_y;
+} Buffer;
 
-#endif // !__MAIN_H__
+#endif // !MAIN_H

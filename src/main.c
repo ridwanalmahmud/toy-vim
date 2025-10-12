@@ -1,25 +1,7 @@
 #include "main.h"
 #include "modes.h"
 #include <ncurses.h>
-
-void backspace(void) {
-    int x, y;
-    getyx(stdscr, y, x);
-
-    if (x != 0) {
-        move(y, x - 1);
-        delch();
-    } else if (y > 0) {
-        move(y - 1, 0);
-        while (x < COLS && mvinch(y - 1, x) != ' ') {
-            x++;
-        }
-        if (x > 0) {
-            move(y - 1, x - 1);
-        }
-        delch();
-    }
-}
+#include <stdlib.h>
 
 int main(void) {
     initscr();
@@ -27,25 +9,33 @@ int main(void) {
     keypad(stdscr, true);
     noecho();
 
+    Buffer *buff = malloc(sizeof(Buffer));
+    buff->contents = calloc(1024, sizeof(char));
+    buff->buf_size = 0;
+    buff->buf_x = 0;
+    buff->buf_y = 0;
+
     Mode mode = NORMAL;
     mode_stat(mode);
 
-    int ch = getch();
+    int ch = 0;
     while (ch != CTRL('q')) {
         mode_stat(mode);
         ch = getch();
         switch (mode) {
         case NORMAL:
-            normal_mode(ch, &mode);
+            keypad(stdscr, TRUE);
+            normal_mode(ch, buff, &mode);
             break;
         case INSERT:
             keypad(stdscr, FALSE);
-            insert_mode(ch, &mode);
+            insert_mode(ch, buff, &mode);
             break;
         }
     }
 
     refresh();
+    free(buff);
     endwin();
 
     return 0;

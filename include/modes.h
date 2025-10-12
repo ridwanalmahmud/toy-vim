@@ -1,5 +1,7 @@
-#ifndef __MODES_H__
-#define __MODES_H__
+#ifndef MODES_H
+#define MODES_H
+
+#include "main.h"
 
 typedef enum {
     NORMAL,
@@ -7,7 +9,7 @@ typedef enum {
 } Mode;
 
 void mode_stat(Mode mode);
-void insert_mode(int ch, Mode *mode);
-void normal_mode(int ch, Mode *mode);
+void insert_mode(int ch, Buffer *buff, Mode *mode);
+void normal_mode(int ch, Buffer *buff, Mode *mode);
 
-#endif // !__MODES_H__
+#endif // !MODES_H
