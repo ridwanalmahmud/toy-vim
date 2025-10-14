@@ -2,6 +2,7 @@
 #include <ncurses.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void init_buffer(Buffer *buff) {
     *buff = (Buffer){0};
@@ -23,9 +24,12 @@ void init_buffer(Buffer *buff) {
         buff->rows[0].line_num = 1;
     }
 
-    // initialize scrolling
+    // initialize scrolling and line numbers
     buff->row_offset = 0;
     buff->col_offset = 0;
+    buff->show_line_numbers = false;
+    buff->show_relative_numbers = true;
+    buff->line_number_width = 6;
 }
 
 void free_buffer(Buffer *buff) {
@@ -59,6 +63,43 @@ void write_buffer(char *filename, Buffer *buff) {
         }
         fclose(file);
     }
+}
+
+int load_file_into_buffer(const char *filename, Buffer *buff) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        return -1;
+    }
+
+    char line[4096];
+    size_t line_count = 0;
+
+    while (fgets(line, sizeof(line), file) && line_count < buff->capacity) {
+        // remove newline character if present
+        size_t len = strlen(line);
+        if (len > 0 && line[len - 1] == '\n') {
+            line[len - 1] = '\0';
+            len--;
+        }
+
+        if (line_count >= buff->num_rows) {
+            ensure_buffer_capacity(buff);
+        }
+
+        // allocate or reallocate row content
+        ensure_row_capacity(&buff->rows[line_count], len + 1);
+
+        // copy line content
+        strcpy(buff->rows[line_count].contents, line);
+        buff->rows[line_count].length = len;
+        buff->rows[line_count].line_num = line_count + 1;
+
+        line_count++;
+    }
+
+    buff->num_rows = line_count;
+    fclose(file);
+    return 0;
 }
 
 int get_line_len(int line) {

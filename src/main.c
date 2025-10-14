@@ -6,43 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 
-int load_file_into_buffer(const char *filename, Buffer *buff) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        return -1;
-    }
-
-    char line[4096];
-    size_t line_count = 0;
-
-    while (fgets(line, sizeof(line), file) && line_count < buff->capacity) {
-        // remove newline character if present
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
-            len--;
-        }
-
-        if (line_count >= buff->num_rows) {
-            ensure_buffer_capacity(buff);
-        }
-
-        // allocate or reallocate row content
-        ensure_row_capacity(&buff->rows[line_count], len + 1);
-
-        // copy line content
-        strcpy(buff->rows[line_count].contents, line);
-        buff->rows[line_count].length = len;
-        buff->rows[line_count].line_num = line_count + 1;
-
-        line_count++;
-    }
-
-    buff->num_rows = line_count;
-    fclose(file);
-    return 0;
-}
-
 void create_empty_file(const char *filename) {
     FILE *file = fopen(filename, "w");
     if (file) {
@@ -56,72 +19,146 @@ void draw_interface(Buffer *buff, Mode mode, const char *filename) {
 
     clear();
 
-    // adjust row offset if cursor moved off screen
+    // adjust scrolling (your existing code)
     if (buff->cursor.y < buff->row_offset) {
         buff->row_offset = buff->cursor.y;
     } else if (buff->cursor.y >= buff->row_offset + screen_rows - 1) {
         buff->row_offset = buff->cursor.y - screen_rows + 2;
     }
 
-    // adjust column offset if cursor moved off screen
     if (buff->cursor.x < buff->col_offset) {
         buff->col_offset = buff->cursor.x;
     } else if (buff->cursor.x >= buff->col_offset + screen_cols) {
         buff->col_offset = buff->cursor.x - screen_cols + 1;
     }
 
-    // display visible rows only
+    // calculate line number area width
+    int line_num_area = 0;
+    if (buff->show_line_numbers || buff->show_relative_numbers) {
+        // calculate needed width based on total lines
+        int max_line_num = buff->num_rows;
+        buff->line_number_width = 0;
+        while (max_line_num > 0) {
+            max_line_num /= 10;
+            buff->line_number_width++;
+        }
+        buff->line_number_width += 4; // add some padding
+        if (buff->line_number_width < 4)
+            buff->line_number_width = 4;
+        if (buff->line_number_width > 8)
+            buff->line_number_width = 8;
+
+        line_num_area = buff->line_number_width;
+    }
+
+    // display visible rows with line numbers
     for (int i = 0; i < screen_rows - 1; i++) {
         size_t row_idx = buff->row_offset + i;
 
+        // draw line numbers
+        if (line_num_area > 0 && row_idx < buff->num_rows) {
+            char line_num_str[16];
+
+            if (buff->show_relative_numbers) {
+                // relative line numbers
+                int relative_num = abs((int)row_idx - (int)buff->cursor.y);
+                if (relative_num == 0) {
+                    // current line shows absolute number
+                    snprintf(line_num_str,
+                             sizeof(line_num_str),
+                             "%*zu ",
+                             buff->line_number_width - 1,
+                             row_idx + 1);
+                } else {
+                    snprintf(line_num_str,
+                             sizeof(line_num_str),
+                             "%*d ",
+                             buff->line_number_width - 1,
+                             relative_num);
+                }
+            } else if (buff->show_line_numbers) {
+                // absolute line numbers
+                snprintf(line_num_str,
+                         sizeof(line_num_str),
+                         "%*zu ",
+                         buff->line_number_width - 1,
+                         row_idx + 1);
+            }
+
+            // draw line number with different attributes
+            attron(COLOR_PAIR(4) | A_DIM);
+            mvprintw(i, 0, "%s  ", line_num_str);
+            attroff(COLOR_PAIR(4) | A_DIM);
+        } else if (line_num_area > 0) {
+            // empty line in line number area
+            mvprintw(i, 0, "%*s", line_num_area, "");
+        }
+
+        // display text content
         if (row_idx < buff->num_rows) {
             Row *row = &buff->rows[row_idx];
 
-            // calculate how much of the line to display
+            // calculate how much of the line to display (account for line number area)
+            int text_start_col = line_num_area;
+            int available_width = screen_cols - text_start_col;
             int display_length = row->length - buff->col_offset;
-            if (display_length > screen_cols) {
-                display_length = screen_cols;
+
+            if (display_length > available_width) {
+                display_length = available_width;
             }
 
             if (display_length > 0 && buff->col_offset < row->length) {
                 mvprintw(i,
-                         0,
+                         text_start_col,
                          "%.*s",
                          display_length,
                          row->contents + buff->col_offset);
             }
 
             // clear the rest of the line
-            if (display_length < screen_cols) {
-                mvprintw(
-                    i, display_length, "%*s", screen_cols - display_length, "");
+            if (display_length < available_width) {
+                mvprintw(i,
+                         text_start_col + display_length,
+                         "%*s",
+                         available_width - display_length,
+                         "");
             }
         } else {
-            // clear empty lines
-            mvprintw(i, 0, "%*s", screen_cols, "");
+            // clear empty lines (text area only)
+            mvprintw(i, line_num_area, "%*s", screen_cols - line_num_area, "");
         }
     }
 
-    // draw status bar with scrolling info
+    // draw status bar with line number mode info
     attron(A_REVERSE);
+    char line_mode[16];
+    if (buff->show_relative_numbers) {
+        snprintf(line_mode, sizeof(line_mode), "REL");
+    } else if (buff->show_line_numbers) {
+        snprintf(line_mode, sizeof(line_mode), "ABS");
+    } else {
+        snprintf(line_mode, sizeof(line_mode), "NO");
+    }
+
     mvprintw(screen_rows - 1,
              0,
-             " %s | %s | Row %zu/%zu, Col %zu ",
+             " %s | %s | Line: %s | Row %zu/%zu, Col %zu ",
              stringify_mode(mode),
              filename,
+             line_mode,
              buff->cursor.y + 1,
              buff->num_rows,
              buff->cursor.x + 1);
     clrtoeol();
     attroff(A_REVERSE);
 
-    // calculate screen-relative cursor position
+    // calculate screen-relative cursor position (account for line numbers)
     int screen_cursor_y = buff->cursor.y - buff->row_offset;
-    int screen_cursor_x = buff->cursor.x - buff->col_offset;
+    int screen_cursor_x = buff->cursor.x - buff->col_offset + line_num_area;
 
     // ensure cursor stays on screen
     if (screen_cursor_y >= 0 && screen_cursor_y < screen_rows - 1 &&
-        screen_cursor_x >= 0 && screen_cursor_x < screen_cols) {
+        screen_cursor_x >= line_num_area && screen_cursor_x < screen_cols) {
         move(screen_cursor_y, screen_cursor_x);
     }
 }

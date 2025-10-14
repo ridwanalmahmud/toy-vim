@@ -4,6 +4,7 @@
 #define BACKSPACE 127
 #define ENTER 10
 #define ESC 27
+#define TAB 9
 #define CTRL(x) ((x) & 0x1f)
 
 #endif // !MAIN_H

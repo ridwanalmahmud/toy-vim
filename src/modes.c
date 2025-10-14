@@ -39,6 +39,11 @@ void insert_mode(int ch, Buffer *buff, Mode *mode) {
     case ENTER:
         insert_newline(buff);
         break;
+    case TAB:
+        for (int i = 0; i < 4; i++) {
+            insert_char_at_cursor(buff, ' ');
+        }
+        break;
     default:
         insert_char_at_cursor(buff, ch);
         break;
@@ -188,6 +193,9 @@ void normal_mode(int ch, Buffer *buff, Mode *mode) {
                     row->length - buff->cursor.x - 1);
             row->length--;
             row->contents[row->length] = '\0';
+            if (buff->cursor.x > 0) {
+                buff->cursor.x--;
+            }
         }
         break;
     case 'D':
